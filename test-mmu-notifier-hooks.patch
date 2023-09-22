@@ -1,0 +1,158 @@
+diff --git a/.config b/.config
+index e5eb55132433..802a3bff0753 100644
+--- a/.config
++++ b/.config
+@@ -716,6 +716,8 @@ CONFIG_HAVE_KVM_IRQ_BYPASS=y
+ CONFIG_HAVE_KVM_NO_POLL=y
+ CONFIG_KVM_XFER_TO_GUEST_WORK=y
+ CONFIG_HAVE_KVM_PM_NOTIFIER=y
++CONFIG_KVM_GENERIC_MMU_NOTIFIER=y
++CONFIG_KVM_GENERIC_MEMORY_ATTRIBUTES=y
+ CONFIG_VIRTUALIZATION=y
+ CONFIG_KVM=m
+ CONFIG_KVM_WERROR=y
+diff --git a/arch/x86/kvm/svm/svm.c b/arch/x86/kvm/svm/svm.c
+index 551b146002ef..72dfae1fff9d 100644
+--- a/arch/x86/kvm/svm/svm.c
++++ b/arch/x86/kvm/svm/svm.c
+@@ -1857,9 +1857,11 @@ static int pf_interception(struct kvm_vcpu *vcpu)
+ static int npf_interception(struct kvm_vcpu *vcpu)
+ {
+ 	struct vcpu_svm *svm = to_svm(vcpu);
++static int cnt=0;
+ 
+ 	u64 fault_address = svm->vmcb->control.exit_info_2;
+ 	u64 error_code = svm->vmcb->control.exit_info_1;
++if(cnt == 0 || cnt % 70000 == 0) { printk(KERN_NOTICE "MJS-%s Entered\n", __func__); }
+ 
+ 	trace_kvm_page_fault(fault_address, error_code);
+ 	return kvm_mmu_page_fault(vcpu, fault_address, error_code,
+diff --git a/redhat/rhdocs/scripts/go.mod b/redhat/rhdocs/scripts/go.mod
+deleted file mode 100644
+index 48788188a307..000000000000
+--- a/redhat/rhdocs/scripts/go.mod
++++ /dev/null
+@@ -1,9 +0,0 @@
+-module RHMAINTAINERS_parser
+-
+-go 1.14
+-
+-require (
+-	github.com/goccy/go-yaml v1.8.8 // indirect
+-	gopkg.in/yaml.v1 v1.0.0-20140924161607-9f9df34309c0 // indirect
+-	gopkg.in/yaml.v2 v2.4.0 // indirect
+-)
+diff --git a/virt/kvm/kvm_main.c b/virt/kvm/kvm_main.c
+index e2d89e3df903..ac1ae175f9be 100644
+--- a/virt/kvm/kvm_main.c
++++ b/virt/kvm/kvm_main.c
+@@ -657,6 +657,7 @@ static void kvm_mmu_notifier_change_pte(struct mmu_notifier *mn,
+ 					pte_t pte)
+ {
+ 	struct kvm *kvm = mmu_notifier_to_kvm(mn);
++static int cnt=0;
+ 
+ 	trace_kvm_set_spte_hva(address);
+ 
+@@ -670,12 +671,13 @@ static void kvm_mmu_notifier_change_pte(struct mmu_notifier *mn,
+ 	WARN_ON_ONCE(!READ_ONCE(kvm->mn_active_invalidate_count));
+ 	if (!READ_ONCE(kvm->mmu_notifier_count))
+ 		return;
+-
++printk(KERN_NOTICE "MJS-%s Entered cnt=%d mmu_notifier_count=%ld\n", __func__, cnt++, kvm->mmu_notifier_count);
+ 	kvm_handle_hva_range(mn, address, address + 1, pte, kvm_set_spte_gfn);
+ }
+ 
+ void kvm_mmu_invalidate_begin(struct kvm *kvm)
+ {
++static int cnt=0;
+ 	lockdep_assert_held_write(&kvm->mmu_lock);
+         /*
+ 	 * The count increase must become visible at unlock time as no
+@@ -683,20 +685,26 @@ void kvm_mmu_invalidate_begin(struct kvm *kvm)
+ 	 * count is also read inside the mmu_lock critical section.
+  	 */
+ 	kvm->mmu_notifier_count++;
++printk(KERN_NOTICE "MJS-%s Entered mmu_notifier_count=%ld cnt=%d\n", __func__, kvm->mmu_notifier_count, cnt++);
+ 
+-        if (likely(kvm->mmu_notifier_count == 1))
++        if (likely(kvm->mmu_notifier_count == 1)) {
++printk(KERN_NOTICE "MJS-%s Entered mmu_notifier_count=%ld hit INVALID_GPA\n", __func__, kvm->mmu_notifier_count);
+                 kvm->mmu_notifier_range_start = INVALID_GPA;
++        }
+ }
+ 
+ 
+ 
+ void kvm_mmu_invalidate_range_add(struct kvm *kvm, gfn_t start, gfn_t end)
+ {
++static int cnt=0;
++cnt++;
+ 	lockdep_assert_held_write(&kvm->mmu_lock);
+ 
+ 	WARN_ON_ONCE(!kvm->mmu_notifier_count);
+ 
+ 	if (likely(kvm->mmu_notifier_count == 1)) {
++printk(KERN_NOTICE "MJS-%s Entered mmu_notifier_count=1 start=%lld end=%lld cnt=%d\n", __func__, start, end, cnt);
+ 		kvm->mmu_notifier_range_start = start;
+ 		kvm->mmu_notifier_range_end = end;
+ 	} else {
+@@ -713,6 +721,7 @@ void kvm_mmu_invalidate_range_add(struct kvm *kvm, gfn_t start, gfn_t end)
+ 			min(kvm->mmu_notifier_range_start, start);
+ 		kvm->mmu_notifier_range_end =
+ 			max(kvm->mmu_notifier_range_end, end);
++printk(KERN_NOTICE "MJS-%s Entered mmu_notifier_count=%ld start=%lld end=%lld cnt=%d\n", __func__, kvm->mmu_notifier_count, kvm->mmu_notifier_range_start, kvm->mmu_notifier_range_end, cnt);
+ 	}
+ }
+ 
+@@ -735,6 +744,9 @@ static int kvm_mmu_notifier_invalidate_range_start(struct mmu_notifier *mn,
+ 		.flush_on_ret	= true,
+ 		.may_block	= mmu_notifier_range_blockable(range),
+ 	};
++static int cnt=0;
++printk(KERN_NOTICE "MJS-%s Entered range->start=%lx range->end=%lx cnt=%d\n", __func__, range->start, 
++		range->end, cnt++);
+ 
+ 	trace_kvm_unmap_hva_range(range->start, range->end);
+ 
+@@ -750,6 +762,7 @@ static int kvm_mmu_notifier_invalidate_range_start(struct mmu_notifier *mn,
+ 	kvm->mn_active_invalidate_count++;
+ 	spin_unlock(&kvm->mn_invalidate_lock);
+ 
++printk(KERN_NOTICE "MJS-%s Entered range->start=%lx range->end=%lx cnt=%d mn_active_invalidate_count=%ld\n", __func__, range->start, range->end, cnt++, kvm->mn_active_invalidate_count);
+ 	gfn_to_pfn_cache_invalidate_start(kvm, range->start, range->end,
+ 					  hva_range.may_block);
+ 
+@@ -761,6 +774,7 @@ static int kvm_mmu_notifier_invalidate_range_start(struct mmu_notifier *mn,
+ void kvm_mmu_invalidate_end(struct kvm *kvm)
+ 
+ {
++static int cnt=0;
+ 	/*
+ 	 * This sequence increase will notify the kvm page fault that
+ 	 * the page that is going to be mapped in the spte could have
+@@ -774,6 +788,7 @@ void kvm_mmu_invalidate_end(struct kvm *kvm)
+ 	 * in conjunction with the smp_rmb in mmu_notifier_retry().
+ 	 */
+ 	kvm->mmu_notifier_count--;
++printk(KERN_NOTICE "MJS-%s Entered cnt=%d mn_active_invalidate_count=%ld\n", __func__, cnt++, kvm->mmu_notifier_count);
+ 
+ 	/*
+ 	 * Assert that at least one range must be added between start() and
+@@ -797,6 +812,7 @@ static void kvm_mmu_notifier_invalidate_range_end(struct mmu_notifier *mn,
+ 		.may_block	= mmu_notifier_range_blockable(range),
+ 	};
+ 	bool wake;
++static int cnt=0;
+ 
+ 	__kvm_handle_hva_range(kvm, &hva_range);
+ 
+@@ -804,7 +820,7 @@ static void kvm_mmu_notifier_invalidate_range_end(struct mmu_notifier *mn,
+ 	spin_lock(&kvm->mn_invalidate_lock);
+ 	wake = (--kvm->mn_active_invalidate_count == 0);
+ 	spin_unlock(&kvm->mn_invalidate_lock);
+-
++printk(KERN_NOTICE "MJS-%s Entered range->start=%lx range->end=%lx cnt=%d mn_active_invalidate_count=%ld\n", __func__, range->start, range->end, cnt++, kvm->mn_active_invalidate_count);
+ 	/*
+ 	 * There can only be one waiter, since the wait happens under
+ 	 * slots_lock.
