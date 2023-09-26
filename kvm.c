@@ -9,6 +9,10 @@
 #include <asm-generic/ioctl.h>
 #include <linux/kvm.h>
 
+#define KVM_CAP_VM_TYPES 232
+#define KVM_X86_DEFAULT_VM	0
+#define KVM_X86_SW_PROTECTED_VM	1
+
 /*
 #define KVMIO 0xAE
 #define KVM_GET_API_VERSION       _IO(KVMIO,   0x00)
@@ -45,6 +49,7 @@ int main()
     int vmfd;
     int nr_slots;
     struct kvm_userspace_memory_region mem;
+    int type;
 
     if ((devfd = open("/dev/kvm", O_RDWR)) < 0) {
 	    printf("/devkvm open failed errno = %d \n", errno);
@@ -58,20 +63,41 @@ int main()
     }
     printf("KVM_API_VERSION successful = 0x%x\n", ret);
 
-    nr_slots = ioctl(devfd, KVM_CHECK_EXTENSION, KVM_CAP_NR_MEMSLOTS);
-    if (nr_slots < 0) {
+    if((nr_slots = ioctl(devfd, KVM_CHECK_EXTENSION, KVM_CAP_NR_MEMSLOTS)) < 0) {
 	    printf("extension KVM_CHECK_EXTENSION failed = %d \n", errno);
 	    goto out;
     }
     printf("KVM_CAP_NR_MEMSLOTS successful = %d\n", nr_slots);
 
-    vmfd = ioctl(devfd, KVM_CREATE_VM, 0);
-    if (vmfd < 0) {
-	    printf("/devkvm open failed errno = %d \n", vmfd);
+    if((ret = ioctl(devfd, KVM_CHECK_EXTENSION, KVM_CAP_VM_TYPES)) < 0) {
+	    printf("extension KVM_CHECK_EXTENSION KVM_CAP_VM_TYPES failed = %d \n", errno);
 	    goto out;
     }
-    printf("KVM_CREATE_VM successful = 0x%x\n", vmfd);
 
+    if (ret ^ ((1 < KVM_X86_DEFAULT_VM) | (1 < KVM_X86_SW_PROTECTED_VM)) == 0)
+        printf("KVM_CHECK_EXTENSION Success = KVM_X86_DEFAUL_VM|KVM_X86_SW_PROTECTED_VM =0x%x\n", ret);
+    else 
+	printf("KVM_CHECK_EXTENSION failed ret = %x\n", ret);
+
+    type = KVM_X86_DEFAULT_VM;
+    if((vmfd = ioctl(devfd, KVM_CREATE_VM, type)) < 0) {
+	    printf("KVM_CREWATE_VM failed = %d \n", -errno);
+	    goto out;
+    }
+    printf("KVM_CREATE_VM type %s Succeeded\n",  
+	    KVM_X86_DEFAULT_VM ? "KVM_X86_DEFAULT_VM" : "KVM_X86_SW_PROTECTED_VM");
+
+    close(vmfd);
+
+    type = KVM_X86_SW_PROTECTED_VM;
+    if((vmfd = ioctl(devfd, KVM_CREATE_VM, type)) < 0) {
+	    printf("KVM_CREWATE_VM failed = %d \n", -errno);
+	    goto out;
+    }
+    printf("KVM_CREATE_VM type %s Succeeded\n",  
+	    KVM_X86_DEFAULT_VM ? "KVM_X86_DEFAULT_VM" : "KVM_X86_SW_PROTECTED_VM");
+
+    /*
     mem.slot = 1;
     mem.userspace_addr = ((unsigned long) &guestmem) & ~(0x1000-1);
     mem.guest_phys_addr = 0x10000000;
@@ -84,6 +110,7 @@ int main()
     }
 
     printf("KVM_KVM_SET_USER_MEMORY_REGION successful = 0x%x\n", ret);
+*/
     close(vmfd);
 
 out:
