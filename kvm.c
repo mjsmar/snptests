@@ -8,10 +8,37 @@
 #include <sys/ioctl.h>
 #include <asm-generic/ioctl.h>
 #include <linux/kvm.h>
+#include <fcntl.h>
+#include <linux/falloc.h>
 
 #define KVM_CAP_VM_TYPES 232
 #define KVM_X86_DEFAULT_VM	0
 #define KVM_X86_SW_PROTECTED_VM	1
+
+#define KVM_CREATE_GUEST_MEMFD _IOWR(KVMIO,  0xd4, struct kvm_create_guest_memfd)
+#define KVM_GUEST_MEMFD_ALLOW_HUGEPAGE         (1ULL << 0)
+
+#define KVM_SET_USER_MEMORY_REGION2 _IOW(KVMIO, 0x49, \
+                                      struct kvm_userspace_memory_region2)
+//#define KVM_MEM_PRIVATE         (1UL << 2)
+
+struct kvm_create_guest_memfd {
+        __u64 size;
+        __u64 flags;
+        __u64 reserved[6];
+};
+
+struct kvm_userspace_memory_region2 {
+        __u32 slot;
+        __u32 flags;
+        __u64 guest_phys_addr;
+        __u64 memory_size;
+        __u64 userspace_addr;
+        __u64 gmem_offset;
+        __u32 gmem_fd;
+        __u32 pad1;
+        __u64 pad2[14];
+};
 
 /*
 #define KVMIO 0xAE
@@ -45,11 +72,13 @@ char guestmem[33554432];
 
 int main()
 {
-    int devfd, ret;
+    int devfd, gmemfd, ret;
     int vmfd;
     int nr_slots;
-    struct kvm_userspace_memory_region mem;
+    struct kvm_userspace_memory_region2 mem;
+    struct kvm_create_guest_memfd gmem;
     int type;
+    unsigned long size = 0x200000000;
 
     if ((devfd = open("/dev/kvm", O_RDWR)) < 0) {
 	    printf("/devkvm open failed errno = %d \n", errno);
@@ -79,16 +108,6 @@ int main()
     else 
 	printf("KVM_CHECK_EXTENSION failed ret = %x\n", ret);
 
-    type = KVM_X86_DEFAULT_VM;
-    if((vmfd = ioctl(devfd, KVM_CREATE_VM, type)) < 0) {
-	    printf("KVM_CREWATE_VM failed = %d \n", -errno);
-	    goto out;
-    }
-    printf("KVM_CREATE_VM type %s Succeeded\n",  
-	    KVM_X86_DEFAULT_VM ? "KVM_X86_DEFAULT_VM" : "KVM_X86_SW_PROTECTED_VM");
-
-    close(vmfd);
-
     type = KVM_X86_SW_PROTECTED_VM;
     if((vmfd = ioctl(devfd, KVM_CREATE_VM, type)) < 0) {
 	    printf("KVM_CREWATE_VM failed = %d \n", -errno);
@@ -96,6 +115,49 @@ int main()
     }
     printf("KVM_CREATE_VM type %s Succeeded\n",  
 	    KVM_X86_DEFAULT_VM ? "KVM_X86_DEFAULT_VM" : "KVM_X86_SW_PROTECTED_VM");
+
+    gmem.size = size;
+    gmem.flags =  KVM_GUEST_MEMFD_ALLOW_HUGEPAGE;
+    if ((gmemfd = ioctl(vmfd, KVM_CREATE_GUEST_MEMFD, &gmem)) < 0) {
+	    printf("KVM_CREATE_GUEST_MEMFD failed = %d \n", -errno);
+	    goto out1;
+    }
+    printf("KVM_GUEST_MEMFD_HUGE_PMD success gmemfd=%d\n", gmemfd);
+
+    if (fallocate(gmemfd, FALLOC_FL_KEEP_SIZE, 0, size) < 0) {
+	    printf("fallocate() for %lx failed = %d \n", size, -errno);
+	    goto out2;
+    }
+    
+    printf("fallocate() success type return size = %lx\n", size);
+    getchar();
+
+    if (fallocate(gmemfd, FALLOC_FL_KEEP_SIZE| FALLOC_FL_PUNCH_HOLE, 0, size) < 0) {
+	    printf("fallocate() for %lx failed = %d \n", size, -errno);
+	    goto out;
+    }
+
+    printf("fallocate() success type return\n");
+    getchar();
+
+    mem.slot=1;
+    mem.guest_phys_addr = 0x10000000;
+    mem.userspace_addr = ((unsigned long) &guestmem) & ~(0x1000-1);
+    mem.flags = KVM_MEM_PRIVATE;
+    mem.memory_size = size;
+    mem.gmem_fd = gmemfd;
+    mem.gmem_offset = 0;
+    if ((ret = ioctl(vmfd, KVM_SET_USER_MEMORY_REGION2, &mem)) < 0) {
+        printf("KVM_SET_USER_MEMORY_REGION2 failed %d \n", -errno);
+	goto out2;
+    }
+    printf("KVM_SET_USER_MEMORY_REGION2 Success\n");
+    printf("type return to continue\n");
+    getchar();
+
+out2:
+    close(gmemfd);
+
 
     /*
     mem.slot = 1;
@@ -111,6 +173,7 @@ int main()
 
     printf("KVM_KVM_SET_USER_MEMORY_REGION successful = 0x%x\n", ret);
 */
+out1:
     close(vmfd);
 
 out:
