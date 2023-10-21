@@ -15,6 +15,11 @@
 #define ONE_M (ONE_K * ONE_K)
 #define ONE_G (1000 * ONE_M)
 
+/*
+ * Loads the guest with size specified in MBs, that will cause KVM
+ * page faults to populate NPTs. 
+ */
+
 int main(int argc, char *argv[])
 {
 
@@ -27,31 +32,26 @@ int main(int argc, char *argv[])
     unsigned long size = strtoul(argv[1], NULL, 10);
     size *= ONE_M;
     unsigned long i, len = size/sizeof(unsigned long);
-    printf("size = %lu i = %lu\n", size, len);
+
+    fprintf(stderr, "size = %lu i = %lu\n", size, len);
     unsigned long *ptr;
     if ((ptr = (void *) mmap((void *) NULL, size, PROT_READ|PROT_WRITE, flags,0, 0)) == MAP_FAILED) {
         fprintf(stderr, "failed to map() a size=%lu errno=%d\n", size, errno);
 	exit(0);
     } else
-        printf("allocated %lu bytes for 'a'\n", size);
+        fprintf(stderr, "allocated %lu bytes for 'a'\n", size);
 
     for (i=0; i < len; i++) {
        ptr[i] = i;
     }
 
-    printf("type return end program done writing now read\n");
-    //getchar();
 
     ptr[len/2] = 0xdeaddead;
-    unsigned long k;
-    if (mprotect((void *) ptr, size, PROT_READ) < 0)
-	    printf("PROT_READ Failed\n");
+
+    mprotect((void *) ptr, size, PROT_READ);
         
     for (i=0; i < len; i++) {
        if(ptr[i] != i) 
 	       printf("for i ptr[i=%d]=%lx\n", i, ptr[i]);
     }
-    //printf("type return end program done \n");
-    //getchar();
-
 }
